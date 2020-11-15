@@ -1,0 +1,179 @@
+### DATA SCRAPING AND WRANLING PART
+
+library(tidyverse)
+library(rvest)
+library(xml2)
+library(dplyr)
+
+## https://rpubs.com/Mayank7j_2020/billboard_2020 scrape code inspired from
+## Creating a data scraping function to get the needed data
+
+scrape_data <- function(link, year) {
+  read_web <- read_html(link)  ##read the website to after extract the needed information
+  
+  
+  rank <- read_web %>%
+    html_nodes('body') %>%
+    xml_find_all("//div[contains(@class, 'ye-chart-item__rank')]") %>%
+    html_text()
+  
+  artist <- read_web %>%
+    html_nodes('body') %>%
+    xml_find_all("//div[contains(@class, 'ye-chart-item__artist')]") %>%
+    html_text()
+  
+  title <- read_web %>%
+    html_nodes('body') %>%
+    xml_find_all("//div[contains(@class, 'ye-chart-item__title')]") %>%
+    html_text()
+  
+  billboard_ye <- data.frame(rank, artist, title, year)
+
+  return(billboard_ye)
+}
+
+BillboardYE <- data.frame()
+
+for (i in 2006:2019) {
+  url <- paste0("https://www.billboard.com/charts/year-end/", i, "/hot-100-songs")
+  
+  tempchart <- scrape_data(url, i)
+  names(tempchart) <- c('Rank', 'Artist', 'Title', 'Year')
+  
+  BillboardYE <- rbind(BillboardYE, tempchart)
+  #assign(paste0("B", i), scrape_data(url, i)) ## Use this code to have the charts as seperate dataframes
+}
+
+rm(tempchart) ## remove an unneccessary temporary dataframe
+
+for (i in 1:1398) {
+  if (grepl("Featuring", BillboardYE$Artist[i], fixed = TRUE) == TRUE){
+    BillboardYE$Artist[i] <- gsub("Featuring.*", "", BillboardYE$Artist[i]) ## if someone is featured in the song, leave only the main artist
+    BillboardYE$Artist[i] <- gsub("\n\n", "", trimws(BillboardYE$Artist[i], "b"))
+  } else if (grepl(",", BillboardYE$Artist[i], fixed = TRUE) == TRUE) {
+    BillboardYE$Artist[i] <- gsub(",.*", "", BillboardYE$Artist[i])
+    BillboardYE$Artist[i] <- gsub("\n\n", "", trimws(BillboardYE$Artist[i], "b"))
+  } else if (grepl("&", BillboardYE$Artist[i], fixed = TRUE) == TRUE){
+    BillboardYE$Artist[i] <- gsub("&.*", "", BillboardYE$Artist[i])
+    BillboardYE$Artist[i] <- gsub("\n\n", "", trimws(BillboardYE$Artist[i], "b"))
+  } else if (grepl("Duet", BillboardYE$Artist[i], fixed = TRUE) == TRUE){
+    BillboardYE$Artist[i] <- gsub("Duet.*", "", BillboardYE$Artist[i])
+    BillboardYE$Artist[i] <- gsub("\n\n", "", trimws(BillboardYE$Artist[i], "b"))
+  } else if (grepl(" / ", BillboardYE$Artist[i], fixed = TRUE) == TRUE){
+    BillboardYE$Artist[i] <- gsub(" / .*", "", BillboardYE$Artist[i])
+    BillboardYE$Artist[i] <- gsub("\n\n", "", trimws(BillboardYE$Artist[i], "b"))
+  } else if (grepl("+", BillboardYE$Artist[i], fixed = TRUE) == TRUE){
+    if (BillboardYE$Artist[i] != "Dan + Shay") {
+      BillboardYE$Artist[i] <- gsub("[+].*", "", BillboardYE$Artist[i])
+      BillboardYE$Artist[i] <- gsub("\n\n", "", trimws(BillboardYE$Artist[i], "b"))
+    } else (BillboardYE$Artist[i] != "Dan + Shay")
+  } else if (grepl(" x ", tolower(BillboardYE$Artist[i]), fixed = TRUE) == TRUE){
+    BillboardYE$Artist[i] <- gsub("\n\n", "", trimws(str_to_title(BillboardYE$Artist[i]), "b")) 
+    BillboardYE$Artist[i] <- gsub(" X.*", "", BillboardYE$Artist[i])
+  } else (BillboardYE$Artist[i] <- gsub("\n\n", "", trimws(BillboardYE$Artist[i], "b")))
+}
+
+## This loop gets rid of any other (secondary) artists listed to be able to determine the top tag (genre) for each of them
+## There is some inconsistency how Billboard charts write their artists so the code is quite heavy and unpleasant to look at.
+
+## To get artist genre data I need to introduce a package made by a developer on github, to install that a package devtools is neccessarry
+
+install.packages("devtools")
+library(devtools)
+install_github("ppatrzyk/lastfmR")
+library(lastfmR)
+
+## https://github.com/ppatrzyk/lastfmR
+## Lengthy process to gather artist genre due to data being downloaded from a Last.fm API, set genre as N/A if not available
+
+for (i in 1:1398) {
+  if (nrow(get_tags(BillboardYE$Artist[i])) != 0){
+    BillboardYE$toptag[i] <- get_tags(BillboardYE$Artist[i])$tag[1]
+  } else (BillboardYE$toptag[i] <- "N/A")
+}
+
+colnames(BillboardYE)[5] <- "Artist Genre" ## Rename the column for a better aesthetic
+
+
+### DATA VISUALIZATION PART
+install.packages('plyr')
+library(plyr)
+## This package has a function count() that lets us get the frequency of a value in the dataframe and returns it as a dataframe (unlike table() ).
+
+artist_freqq <- count(BillboardYE$Artist)
+
+## This loop assigns each unique value it's top tag.
+
+for (i in 1:length(artist_freq$x)){
+  for (x in 1:length(BillboardYE$Artist)){
+    if (artist_freq$x[i] == BillboardYE$Artist[x]){
+      artist_freq$genre[i] <- BillboardYE$`Artist Genre`[x]
+      break
+    } else (next)
+  }
+}
+
+
+## Most frequent genres on the chart, with number of unique artists, plot #1
+genre_freq_over_five <- count(artist_freq$genre)
+genre_freq_over_five <- subset(genre_freq_over_five,genre_freq_over_five$freq >=5)
+
+ggplot(data =genre_freq_over_five, aes(x=x, y=freq)) +
+  geom_point() +
+  geom_text(aes(label = freq),vjust=-1, hjust=0.5) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(panel.grid.minor = element_line(color="black")) + scale_y_continuous(breaks = seq(10 , 130, 10)) +
+  ggtitle("Most frequent genres on Billboard charts, unique artists") +
+  ylab("Genre frequency 2006-2019") + xlab("Genre")
+
+## Most frequent artist on charts, colored by genre with artist names for artists with 15 and more songs on the charts, plot #2
+artist_freq_over_ten <- subset(artist_freq, artist_freq$freq >= 10)
+
+ggplot(data =artist_freq_over_ten, aes(x=x, y=freq)) +
+  geom_point(aes(color=genre)) +
+  theme_classic() +
+  geom_text(aes(label=ifelse(freq>14,as.character(x),'')),hjust=0,vjust=1) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(panel.grid.minor = element_line(color="black")) + scale_y_continuous(breaks = seq(10 , 30, 5)) +
+  ggtitle("Most frequent artists on Billboard charts") +
+  ylab("Artist frequency 2006-2019") + xlab("Genre")
+
+## Most frequent genres on the chart, total songs, 10 and over frequency, plot #3
+agg_genre_freq <- aggregate(freq ~ genre, artist_freq, sum)
+agg_genre_freq <- subset(agg_genre_freq, agg_genre_freq$freq >= 10)
+
+ggplot(data = agg_genre_freq, aes(x=genre, y=freq)) +
+  geom_point() +
+  geom_text(aes(label = freq),vjust=-1, hjust=0.5) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(panel.grid.minor = element_line(color="black")) + scale_y_continuous(breaks = seq(10 , 350, 30)) +
+  ggtitle("Most frequent genres on Billboard charts, total songs") +
+  ylab("Genre frequency 2006-2019") + xlab("Genre")
+
+## Most frequent genres yearly, plot #4
+year_split <- split(BillboardYE, f = BillboardYE$Year) ## Split the dataframe in years
+
+sum_yearly_genres <- data.frame()
+## Loop to sum artists genre on a yearly basis, with frequency over 5 on a given year (over 5 for a better understandable graph)
+for (i in 2006:2019){
+  temp <- data.frame(year_split[[paste0(i)]][["Artist Genre"]])
+  temp <- count(temp)
+  temp <- subset(temp, temp$freq >=5)
+  colnames(temp)[1] <- "Genre"
+  temp$year <- i
+  sum_yearly_genres <- rbind(sum_yearly_genres, temp)
+}
+rm(temp)
+
+
+ggplot(data = sum_yearly_genres, aes(x=year, y=freq)) +
+  geom_point(aes(color=Genre)) +
+  geom_line(aes(color=Genre))+
+  scale_x_continuous(breaks = sum_yearly_genres$year) +
+  scale_y_continuous(breaks = seq(0, 45,5)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ggtitle("Most frequent genres on Billboard charts, yearly") +
+  ylab("Genre frequency yearly") + xlab("Year")
+
